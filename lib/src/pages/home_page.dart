@@ -1,20 +1,86 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../app.dart';
 import '../models/product.dart';
-import '../provider/product_provider.dart';
+import '../services/product_service.dart';
 import '../utils/format_util.dart';
 import '../utils/icon_string_util.dart';
 
-class MyHomePage extends StatelessWidget {
+class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
 
   final String title;
 
   @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> with RouteAware {
+  /// Kept in state (instead of calling fetchHistory() straight from
+  /// build) so pull-to-refresh has something to replace with a new call.
+  late Future<List<Product>> _recentFuture = productService.fetchHistory();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLostPhoto();
+  }
+
+  /// On some Android phones, opening the native camera app can make the
+  /// OS kill this app in the background to free memory. When that
+  /// happens, Flutter restarts clean on this route - which looks like
+  /// "it sent me back to the main screen" - and the photo result would
+  /// otherwise just be lost. image_picker keeps it recoverable through
+  /// this call; if there's one waiting, we resume the flow with it
+  /// instead of silently dropping it.
+  Future<void> _checkLostPhoto() async {
+    try {
+      final LostDataResponse response = await ImagePicker().retrieveLostData();
+      if (response.isEmpty || response.file == null) return;
+      if (!mounted) return;
+
+      Navigator.pushNamed(
+        context,
+        'identifying',
+        arguments: {'photoPath': response.file!.path},
+      );
+    } catch (_) {
+      // Not worth surfacing an error for a best-effort recovery check.
+    }
+  }
+
+  Future<void> _refresh() async {
+    final Future<List<Product>> next = productService.fetchHistory();
+    setState(() => _recentFuture = next);
+    await next;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context) as PageRoute);
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  /// Called when Home becomes visible again after a route pushed on top
+  /// of it (camera, result, etc.) gets popped - exactly when a product
+  /// may have just been created or deleted elsewhere.
+  @override
+  void didPopNext() => _refresh();
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(title),
+        title: Text(widget.title),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
@@ -23,23 +89,26 @@ class MyHomePage extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _scanCard(context),
-          const SizedBox(height: 16),
-          _quickActions(context),
-          const SizedBox(height: 24),
-          _sectionTitle(context, 'Escaneos recientes', () {
-            Navigator.pushNamed(context, 'history');
-          }),
-          ..._recentItems(context),
-        ],
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _scanCard(context),
+            const SizedBox(height: 16),
+            _quickActions(context),
+            const SizedBox(height: 24),
+            _sectionTitle(context, 'Escaneos recientes', () {
+              Navigator.pushNamed(context, 'history');
+            }),
+            _recentItems(context),
+          ],
+        ),
       ),
     );
   }
 
-  /// Accion principal: abrir la camara para identificar un producto.
+  /// Main action: open the camera to identify a product.
   Widget _scanCard(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
 
@@ -151,30 +220,94 @@ class MyHomePage extends StatelessWidget {
     );
   }
 
-  List<Widget> _recentItems(BuildContext context) {
-    final List<Product> recent = productProvider.history().take(3).toList();
+  /// Top 3 most recent products, read straight from Supabase.
+  Widget _recentItems(BuildContext context) {
+    return FutureBuilder<List<Product>>(
+      future: _recentFuture,
+      builder: (BuildContext context, AsyncSnapshot<List<Product>> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-    return recent.map((product) {
-      return Column(
-        children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: getIcon(product.icon, size: 32),
-            title: Text(product.name),
-            subtitle: Text('${product.category} - ${product.scannedAt}'),
-            trailing: Text(
-              '${money(product.priceMin)} - ${money(product.priceMax)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            onTap: () => Navigator.pushNamed(
-              context,
-              'result',
-              arguments: product,
-            ),
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text('No se pudo cargar: ${snapshot.error}'),
+          );
+        }
+
+        final List<Product> recent =
+            (snapshot.data ?? const <Product>[]).take(3).toList();
+
+        if (recent.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('Todavia no escaneaste ningun producto.'),
+          );
+        }
+
+        return Column(
+          children: recent.map((product) => _recentTile(context, product)).toList(),
+        );
+      },
+    );
+  }
+
+  Widget _recentTile(BuildContext context, Product product) {
+    return Column(
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: _thumbnail(product),
+          title: Text(product.name),
+          subtitle: Text('${product.category} - ${product.scannedAt}'),
+          trailing: Text(
+            '${money(product.priceMin)} - ${money(product.priceMax)}',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-          const Divider(height: 1),
-        ],
+          onTap: () => Navigator.pushNamed(
+            context,
+            'result',
+            arguments: product,
+          ),
+        ),
+        const Divider(height: 1),
+      ],
+    );
+  }
+
+  /// Same priority as result_page/history_page: curated cover, then the
+  /// real (persisted) photo, then the icon.
+  Widget _thumbnail(Product product) {
+    final BorderRadius radius = BorderRadius.circular(8);
+
+    if (product.catalogImageAsset != null) {
+      return ClipRRect(
+        borderRadius: radius,
+        child: Image.asset(
+          product.catalogImageAsset!,
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+        ),
       );
-    }).toList();
+    }
+
+    if (product.photoPath != null) {
+      return ClipRRect(
+        borderRadius: radius,
+        child: Image.file(
+          File(product.photoPath!),
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    return getIcon(product.icon, size: 32);
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Modo comparacion de estado: dos fotos, el estado actual del producto
-/// y una referencia de como se ve nuevo.
+/// Condition comparison mode: two photos, the product's current state
+/// and a like-new reference.
 class ConditionPage extends StatefulWidget {
   const ConditionPage({super.key});
 
@@ -81,8 +81,8 @@ class _ConditionPageState extends State<ConditionPage> {
     );
   }
 
-  /// Espacio para una foto. Mientras no haya camara, el toque solo
-  /// cambia el estado del recuadro.
+  /// Placeholder for a photo. Without a real camera yet, tapping it just
+  /// toggles the box's state.
   Widget _photoSlot({
     required String label,
     required bool taken,

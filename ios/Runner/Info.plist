@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>ScanWise necesita la camara para identificar productos y leer codigos de barras.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ScanWise necesita acceso a tus fotos para elegir una imagen del producto.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

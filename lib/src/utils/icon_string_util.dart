@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Mapa de nombres de icono a iconos de Material.
-/// Permite guardar el icono como texto dentro de los datos del producto.
+/// Maps icon names to Material icons.
+/// Lets the icon be stored as plain text inside the product's data.
 final Map<String, IconData> _icons = <String, IconData>{
   'devices_other': Icons.devices_other,
   'headphones': Icons.headphones,

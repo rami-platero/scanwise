@@ -1,80 +1,49 @@
 import '../models/product.dart';
+import 'fake_catalog.dart' as catalog;
 
-/// Datos de prueba. Mas adelante esto se reemplaza por la respuesta
-/// del servicio de identificacion y por la base de datos local.
+/// Sample data. The pieces that will later come from a real identification
+/// service stay here, since there is no AI call yet.
 class _ProductProvider {
-  /// Resultado del primer escaneo: la IA reconoce la categoria y la marca,
-  /// pero no la version exacta (certeza baja a proposito, asi se puede
-  /// probar el flujo de guia interactiva).
-  Product firstGuess() {
-    return const Product(
-      name: 'Auriculares inalambricos',
-      brand: 'Sony',
-      category: 'Audio',
-      model: '',
-      confidence: 0.62,
-      priceMin: 120,
-      priceMax: 210,
-      scannedAt: 'Hoy, 14:32',
-      icon: 'headphones',
-      description:
-          'Auriculares inalambricos con cancelacion de ruido. La version '
-          'exacta no pudo determinarse con la primera foto.',
+  /// Result of the first scan: the AI recognizes the category and the
+  /// brand, but not the exact version (confidence is low on purpose, so
+  /// the interactive guidance flow can be tested). Picked at random from
+  /// a handful of sample products - see fake_catalog.dart - instead of
+  /// always returning the same one.
+  Product firstGuess() => catalog.randomGuess();
+
+  /// The "confirmed" version of whichever scenario this guess came from
+  /// (brand/model/price/description), used once the guidance photos are
+  /// all taken. Falls back to the guess itself if the scenario can't be
+  /// found (shouldn't normally happen).
+  Product confirmedFor(Product guess) {
+    final catalog.ScanScenario? scenario =
+        catalog.scenarioById(guess.scenarioId);
+    if (scenario == null) return guess;
+
+    return guess.copyWith(
+      name: scenario.confirmedName,
+      model: scenario.confirmedModel,
+      confidence: scenario.confirmedConfidence,
+      priceMin: scenario.priceMin,
+      priceMax: scenario.priceMax,
+      description: scenario.description,
     );
   }
 
-  /// Fotos adicionales que la app pide cuando la certeza es baja.
-  List<Map<String, String>> guidanceSteps() {
-    return <Map<String, String>>[
-      {
-        'title': 'Foto del logo',
-        'hint': 'Acerca la camara al logo de la marca, sin reflejos.',
-        'icon': 'camera',
-      },
-      {
-        'title': 'Panel trasero',
-        'hint': 'Captura la parte de atras completa del producto.',
-        'icon': 'devices_other',
-      },
-      {
-        'title': 'Numero de serie',
-        'hint': 'Suele estar en una etiqueta pequena, debajo del producto.',
-        'icon': 'smartphone',
-      },
-    ];
-  }
+  /// Similar listings for the scenario a product came from (or a generic
+  /// fallback for items without one, e.g. loaded from History).
+  List<Map<String, dynamic>> similarListings(String? scenarioId) =>
+      catalog.listingsFor(scenarioId);
 
-  /// Publicaciones parecidas que se usan para el rango de precio.
-  List<Map<String, dynamic>> similarListings() {
-    return <Map<String, dynamic>>[
-      {
-        'title': 'Sony WH-1000XM4 usados',
-        'platform': 'MercadoLibre',
-        'condition': 'Usado - Muy bueno',
-        'price': 185.0,
-      },
-      {
-        'title': 'Auriculares Sony XM4 con estuche',
-        'platform': 'Facebook Marketplace',
-        'condition': 'Usado - Bueno',
-        'price': 160.0,
-      },
-      {
-        'title': 'Sony WH-1000XM4 caja abierta',
-        'platform': 'eBay',
-        'condition': 'Reacondicionado',
-        'price': 205.0,
-      },
-      {
-        'title': 'Sony WH-1000XM4 sin accesorios',
-        'platform': 'OLX',
-        'condition': 'Usado - Aceptable',
-        'price': 132.0,
-      },
-    ];
-  }
+  /// Extra photos needed for whichever scenario this guess came from.
+  /// Can be empty - not every item needs extra depth, same as a real
+  /// recognition model would decide dynamically per product.
+  List<Map<String, String>> guidanceStepsFor(String? scenarioId) =>
+      catalog.guidanceStepsFor(scenarioId);
 
-  /// Historial de productos ya identificados.
+  /// Fallback sample history, used only when a page is opened without a
+  /// real product in its route arguments (e.g. opening it directly while
+  /// the real history in Supabase is still empty).
   List<Product> history() {
     return <Product>[
       const Product(
@@ -123,41 +92,8 @@ class _ProductProvider {
       ),
     ];
   }
-
-  /// Avisos de identificacion lista y de cambios de precio.
-  List<Map<String, dynamic>> notifications() {
-    return <Map<String, dynamic>>[
-      {
-        'title': 'Identificacion completada',
-        'body': 'Sony WH-1000XM4 fue identificado con 97% de certeza.',
-        'time': 'Hace 5 min',
-        'icon': 'headphones',
-        'unread': true,
-      },
-      {
-        'title': 'El precio bajo',
-        'body': 'iPhone 13 128GB ahora promedia \$425 (antes \$440).',
-        'time': 'Hace 2 h',
-        'icon': 'smartphone',
-        'unread': true,
-      },
-      {
-        'title': 'Identificacion incompleta',
-        'body': 'Falta la foto del numero de serie del reloj Garmin.',
-        'time': 'Ayer',
-        'icon': 'watch',
-        'unread': false,
-      },
-      {
-        'title': 'El precio subio',
-        'body': 'Nintendo Switch OLED ahora promedia \$290 (antes \$275).',
-        'time': '28/10/2026',
-        'icon': 'videogame',
-        'unread': false,
-      },
-    ];
-  }
 }
 
-/// Instancia unica para usar desde las paginas, igual que menuProvider.
+/// Single shared instance used from the pages, same pattern as
+/// product_service / notification_service.
 final productProvider = _ProductProvider();
