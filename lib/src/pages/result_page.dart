@@ -1,14 +1,24 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/product.dart';
 import '../provider/product_provider.dart';
+import '../services/product_service.dart';
 import '../utils/format_util.dart';
 import '../utils/icon_string_util.dart';
 
-/// Producto ya identificado: muestra los datos reconocidos y las
-/// acciones que se pueden hacer con el.
-class ResultPage extends StatelessWidget {
+/// Already-identified product: shows the recognized data and the
+/// actions that can be taken on it.
+class ResultPage extends StatefulWidget {
   const ResultPage({super.key});
+
+  @override
+  State<ResultPage> createState() => _ResultPageState();
+}
+
+class _ResultPageState extends State<ResultPage> {
+  bool _deleting = false;
 
   @override
   Widget build(BuildContext context) {
@@ -21,9 +31,21 @@ class ResultPage extends StatelessWidget {
         title: const Text('Producto identificado'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.bookmark_border),
-            tooltip: 'Guardar',
-            onPressed: () => _showMessage(context, 'Guardado en el historial'),
+            icon: _deleting
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  )
+                : Icon(
+                    Icons.delete_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+            tooltip: 'Eliminar',
+            onPressed: _deleting ? null : () => _confirmDelete(product),
           ),
         ],
       ),
@@ -45,16 +67,7 @@ class ResultPage extends StatelessWidget {
   Widget _header(BuildContext context, Product product) {
     return Row(
       children: [
-        // Espacio para la foto tomada. Por ahora va el icono del producto.
-        Container(
-          width: 88,
-          height: 88,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Center(child: getIcon(product.icon, size: 40)),
-        ),
+        _thumbnail(context, product),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -78,6 +91,48 @@ class ResultPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// Prefers the catalog's cover once identification found a match, then
+  /// the real photo taken with the camera (now persisted - see
+  /// ProductService._persistPhoto), then the generic icon as a last
+  /// resort.
+  Widget _thumbnail(BuildContext context, Product product) {
+    final BorderRadius radius = BorderRadius.circular(12);
+
+    if (product.catalogImageAsset != null) {
+      return ClipRRect(
+        borderRadius: radius,
+        child: Image.asset(
+          product.catalogImageAsset!,
+          width: 88,
+          height: 88,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    if (product.photoPath != null) {
+      return ClipRRect(
+        borderRadius: radius,
+        child: Image.file(
+          File(product.photoPath!),
+          width: 88,
+          height: 88,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    return Container(
+      width: 88,
+      height: 88,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: radius,
+      ),
+      child: Center(child: getIcon(product.icon, size: 40)),
     );
   }
 
@@ -180,9 +235,48 @@ class ResultPage extends StatelessWidget {
     );
   }
 
-  void _showMessage(BuildContext context, String text) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(text)),
+  /// Works the same regardless of which sample product this is (Silent
+  /// Hill, a console, or a real future AI result) - delete just needs
+  /// the row's id, nothing scenario-specific.
+  Future<void> _confirmDelete(Product product) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Eliminar producto'),
+        content: Text('¿Eliminar "${product.name}" del historial?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
     );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deleting = true);
+
+    try {
+      await productService.delete(product);
+      if (!mounted) return;
+      // The product is gone - back to Home instead of leaving it
+      // sitting on a route that no longer makes sense.
+      Navigator.popUntil(context, (route) => route.isFirst);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo eliminar: $error')),
+      );
+    }
   }
 }

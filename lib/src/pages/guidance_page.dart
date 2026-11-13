@@ -1,12 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/product.dart';
 import '../provider/product_provider.dart';
+import '../services/notification_service.dart';
+import '../services/product_service.dart';
 import '../utils/format_util.dart';
 
-/// Guia interactiva: cuando la certeza es baja, la app pide fotos
-/// concretas (logo, panel trasero, numero de serie) hasta confirmar
-/// la version exacta del producto.
+/// Interactive guidance: when the first guess isn't enough, the app asks
+/// for specific extra photos until the exact product version gets
+/// confirmed. How many steps (if any) depends on the item - see
+/// fake_catalog.dart - so this screen is only reached when there's at
+/// least one.
 class GuidancePage extends StatefulWidget {
   const GuidancePage({super.key});
 
@@ -15,27 +21,37 @@ class GuidancePage extends StatefulWidget {
 }
 
 class _GuidancePageState extends State<GuidancePage> {
-  final List<Map<String, String>> _steps = productProvider.guidanceSteps();
-
-  /// Marca que fotos ya se sacaron.
+  /// Resolved once the product (and its scenario) is known from the
+  /// route arguments - see _initSteps.
+  List<Map<String, String>>? _steps;
   final List<bool> _captured = [];
 
-  @override
-  void initState() {
-    super.initState();
-    _captured.addAll(List<bool>.filled(_steps.length, false));
+  /// Avoids a double tap while the product is being saved.
+  bool _saving = false;
+
+  /// Only the first build has the route arguments available, so the
+  /// steps are resolved lazily here instead of in initState.
+  void _initSteps(Product product) {
+    if (_steps != null) return;
+
+    final List<Map<String, String>> steps =
+        productProvider.guidanceStepsFor(product.scenarioId);
+    _steps = steps;
+    _captured.addAll(List<bool>.filled(steps.length, false));
   }
 
   int get _capturedCount => _captured.where((done) => done).length;
 
-  bool get _allCaptured => _capturedCount == _steps.length;
+  bool get _allCaptured => _capturedCount == (_steps?.length ?? 0);
 
   @override
   Widget build(BuildContext context) {
-    // El producto llega desde la pantalla anterior.
+    // The product comes from the previous screen.
     final Object? arguments = ModalRoute.of(context)?.settings.arguments;
     final Product product =
         arguments is Product ? arguments : productProvider.firstGuess();
+
+    _initSteps(product);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Falta un poco mas')),
@@ -56,7 +72,7 @@ class _GuidancePageState extends State<GuidancePage> {
     );
   }
 
-  /// Lo que la app ya pudo reconocer con la primera foto.
+  /// What the app could already recognize from the first photo.
   Widget _partialResult(BuildContext context, Product product) {
     return Card(
       child: Padding(
@@ -68,6 +84,21 @@ class _GuidancePageState extends State<GuidancePage> {
               'Reconocimos esto',
               style: Theme.of(context).textTheme.labelLarge,
             ),
+            if (product.catalogImageAsset != null || product.photoPath != null) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  height: 140,
+                  width: double.infinity,
+                  // Prefer the curated cover when there is one; otherwise
+                  // this is the user's own real photo.
+                  child: product.catalogImageAsset != null
+                      ? Image.asset(product.catalogImageAsset!, fit: BoxFit.cover)
+                      : Image.file(File(product.photoPath!), fit: BoxFit.cover),
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -89,7 +120,9 @@ class _GuidancePageState extends State<GuidancePage> {
   }
 
   List<Widget> _stepTiles(BuildContext context) {
-    return List<Widget>.generate(_steps.length, (int i) {
+    final List<Map<String, String>> steps = _steps ?? const [];
+
+    return List<Widget>.generate(steps.length, (int i) {
       final bool done = _captured[i];
 
       return Card(
@@ -98,8 +131,8 @@ class _GuidancePageState extends State<GuidancePage> {
             done ? Icons.check_circle : Icons.photo_camera_outlined,
             color: done ? Colors.green : null,
           ),
-          title: Text(_steps[i]['title'] ?? ''),
-          subtitle: Text(_steps[i]['hint'] ?? ''),
+          title: Text(steps[i]['title'] ?? ''),
+          subtitle: Text(steps[i]['hint'] ?? ''),
           trailing: done
               ? TextButton(
                   onPressed: () => setState(() => _captured[i] = false),
@@ -115,21 +148,31 @@ class _GuidancePageState extends State<GuidancePage> {
   }
 
   Widget _confirmBar(BuildContext context, Product product) {
+    final int total = _steps?.length ?? 0;
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('$_capturedCount de ${_steps.length} fotos listas'),
+            Text('$_capturedCount de $total fotos listas'),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                // Se habilita solo cuando estan todas las fotos.
-                onPressed: _allCaptured ? () => _confirmModel(product) : null,
-                icon: const Icon(Icons.verified_outlined),
-                label: const Text('Confirmar modelo'),
+                // Only enabled once every photo is in.
+                onPressed: (_allCaptured && !_saving)
+                    ? () => _confirmModel(product)
+                    : null,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.verified_outlined),
+                label: Text(_saving ? 'Guardando...' : 'Confirmar modelo'),
               ),
             ),
           ],
@@ -138,19 +181,40 @@ class _GuidancePageState extends State<GuidancePage> {
     );
   }
 
-  /// Con las fotos adicionales la certeza sube y ya hay modelo exacto.
-  void _confirmModel(Product product) {
-    final Product confirmed = product.copyWith(
-      name: 'Sony WH-1000XM4',
-      model: 'WH-1000XM4',
-      confidence: 0.97,
-      priceMin: 130,
-      priceMax: 205,
-      description:
-          'Auriculares inalambricos Sony WH-1000XM4 con cancelacion de ruido '
-          'activa, bluetooth y estuche rigido.',
-    );
+  /// With the extra photos the confidence goes up and the exact model is
+  /// known. This is where the product actually gets saved (CREATE).
+  Future<void> _confirmModel(Product product) async {
+    final Product confirmed = productProvider.confirmedFor(product);
 
-    Navigator.pushReplacementNamed(context, 'result', arguments: confirmed);
+    setState(() => _saving = true);
+
+    try {
+      final Product saved = await productService.create(confirmed);
+      await _notifyIdentified(saved);
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, 'result', arguments: saved);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar el producto: $error')),
+      );
+    }
+  }
+
+  /// Logs an "identification complete" notification for this product.
+  /// Best-effort: a failure here should never block the main CRUD flow.
+  Future<void> _notifyIdentified(Product saved) async {
+    try {
+      await notificationService.create(
+        title: 'Identificacion completada',
+        body: '${saved.name} fue identificado con ${percent(saved.confidence)} '
+            'de certeza.',
+        icon: saved.icon,
+        productId: saved.id,
+      );
+    } catch (_) {
+      // Non-critical: the product is already saved either way.
+    }
   }
 }

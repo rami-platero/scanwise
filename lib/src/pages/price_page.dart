@@ -4,7 +4,7 @@ import '../models/product.dart';
 import '../provider/product_provider.dart';
 import '../utils/format_util.dart';
 
-/// Comparacion de precios: rango de referencia y publicaciones parecidas.
+/// Price comparison: reference range plus similar listings.
 class PricePage extends StatelessWidget {
   const PricePage({super.key});
 
@@ -15,7 +15,7 @@ class PricePage extends StatelessWidget {
         arguments is Product ? arguments : productProvider.history().first;
 
     final List<Map<String, dynamic>> listings =
-        productProvider.similarListings();
+        productProvider.similarListings(product.scenarioId);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Comparar precios')),
@@ -56,7 +56,7 @@ class PricePage extends StatelessWidget {
             ),
             const Text('Precio sugerido'),
             const SizedBox(height: 16),
-            // Barra que ubica el precio sugerido dentro del rango.
+            // Bar that places the suggested price within the range.
             const LinearProgressIndicator(value: 0.5, minHeight: 8),
             const SizedBox(height: 8),
             Row(

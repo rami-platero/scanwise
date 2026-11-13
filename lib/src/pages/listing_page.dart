@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../models/product.dart';
 import '../provider/product_provider.dart';
+import '../services/product_service.dart';
 import '../utils/format_util.dart';
 
-/// Datos de la publicacion armados con la informacion del producto.
-/// El usuario los puede editar antes de copiarlos o compartirlos.
+/// Listing data built from the product's info.
+/// The user can edit it, save it (UPDATE) and then copy/share it.
 class ListingPage extends StatefulWidget {
   const ListingPage({super.key});
 
@@ -18,8 +19,12 @@ class _ListingPageState extends State<ListingPage> {
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
 
-  /// Se llenan los campos una sola vez, con los datos que llegan por la ruta.
+  /// Fields are filled in only once, from the product passed via the route.
   bool _loaded = false;
+  bool _saving = false;
+
+  /// Kept so the save action knows which row to update.
+  Product? _product;
 
   @override
   void dispose() {
@@ -32,6 +37,7 @@ class _ListingPageState extends State<ListingPage> {
   void _loadProduct(Product product) {
     if (_loaded) return;
 
+    _product = product;
     _titleController.text = product.model.isEmpty
         ? '${product.brand} ${product.name}'
         : '${product.brand} ${product.model}';
@@ -65,7 +71,7 @@ class _ListingPageState extends State<ListingPage> {
           ),
           const SizedBox(height: 16),
           TextField(
-            // La categoria la define la identificacion, no se edita.
+            // Category comes from the identification step, not editable here.
             readOnly: true,
             controller: TextEditingController(text: product.category),
             decoration: const InputDecoration(
@@ -109,28 +115,83 @@ class _ListingPageState extends State<ListingPage> {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _showMessage('Datos copiados'),
-                icon: const Icon(Icons.copy),
-                label: const Text('Copiar'),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _saving ? null : _saveChanges,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? 'Guardando...' : 'Guardar cambios'),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton.icon(
-                // Aca va a ir el menu de compartir del telefono.
-                onPressed: () => _showMessage('Abriendo menu de compartir'),
-                icon: const Icon(Icons.share),
-                label: const Text('Compartir'),
-              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showMessage('Datos copiados'),
+                    icon: const Icon(Icons.copy),
+                    label: const Text('Copiar'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    // The native share sheet would be wired in here.
+                    onPressed: () => _showMessage('Abriendo menu de compartir'),
+                    icon: const Icon(Icons.share),
+                    label: const Text('Compartir'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// Persists the edited title, description and price back to the
+  /// product's row in Supabase (UPDATE).
+  Future<void> _saveChanges() async {
+    final Product? product = _product;
+    if (product == null || product.id == null) {
+      _showMessage('Este producto todavia no se guardo en la base de datos');
+      return;
+    }
+
+    final double? price = double.tryParse(_priceController.text);
+    if (price == null) {
+      _showMessage('El precio no es un numero valido');
+      return;
+    }
+
+    setState(() => _saving = true);
+
+    try {
+      await productService.updateListing(
+        product.id!,
+        name: _titleController.text,
+        description: _descriptionController.text,
+        priceMin: price,
+        priceMax: price,
+      );
+      if (!mounted) return;
+      _showMessage('Cambios guardados');
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage('No se pudo guardar: $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   void _showMessage(String text) {
