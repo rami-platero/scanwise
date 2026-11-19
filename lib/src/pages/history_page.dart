@@ -38,7 +38,7 @@ class _HistoryPageState extends State<HistoryPage> {
       setState(() => _products = products);
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Could not load the history: $error');
+      setState(() => _error = 'No se pudo cargar el historial: $error');
     }
   }
 
@@ -155,7 +155,7 @@ class _HistoryPageState extends State<HistoryPage> {
       if (!mounted) return;
       setState(() => _products!.insert(index, product));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete: $error')),
+        SnackBar(content: Text('No se pudo eliminar: $error')),
       );
     }
   }
@@ -182,10 +182,12 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
         ],
       ),
-      // If it was left unconfirmed, tapping it resumes the photo guidance.
+      // Always the result screen: the guidance step needs a live
+      // identification session, which no longer exists for a saved row.
+      // From there the user can rescan if the match looks wrong.
       onTap: () => Navigator.pushNamed(
         context,
-        pending ? 'guidance' : 'result',
+        'result',
         arguments: product,
       ),
     );

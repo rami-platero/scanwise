@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../app.dart';
 import '../models/product.dart';
+import '../services/auth_service.dart';
 import '../services/product_service.dart';
 import '../utils/format_util.dart';
 import '../utils/icon_string_util.dart';
@@ -58,6 +59,39 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
     await next;
   }
 
+  /// Signing out is enough on its own: AuthGate is listening to the auth
+  /// stream and swaps this screen for the login one.
+  Future<void> _confirmLogout() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Cerrar sesion'),
+        content: const Text('Vas a tener que volver a iniciar sesion.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cerrar sesion'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await authService.signOut();
+    } on AuthFailure catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(failure.message)),
+      );
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -86,6 +120,31 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             icon: const Icon(Icons.notifications_outlined),
             tooltip: 'Notificaciones',
             onPressed: () => Navigator.pushNamed(context, 'notifications'),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Cuenta',
+            onSelected: (String value) {
+              if (value == 'logout') _confirmLogout();
+            },
+            itemBuilder: (BuildContext context) => [
+              PopupMenuItem<String>(
+                enabled: false,
+                child: Text(
+                  authService.currentEmail,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                value: 'logout',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.logout),
+                  title: Text('Cerrar sesion'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -124,13 +183,13 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             Icon(Icons.photo_camera, size: 40, color: colors.onPrimaryContainer),
             const SizedBox(height: 12),
             Text(
-              'Identificar un producto',
+              'Identificar un juego o consola',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 4),
             const Text(
-              'Saca una foto y la app reconoce la categoria, la marca y el '
-              'modelo.',
+              'Saca una foto del juego o la consola y la IA reconoce el '
+              'titulo, la plataforma y la version exacta.',
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -153,15 +212,6 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             icon: Icons.qr_code_scanner,
             label: 'Codigo de barras',
             route: 'barcode',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _actionTile(
-            context,
-            icon: Icons.compare,
-            label: 'Comparar estado',
-            route: 'condition',
           ),
         ),
         const SizedBox(width: 12),
