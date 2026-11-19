@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../models/product.dart';
-import '../provider/product_provider.dart';
+import '../widgets/missing_product_scaffold.dart';
 import '../services/product_service.dart';
 import '../utils/format_util.dart';
 import '../utils/icon_string_util.dart';
@@ -20,46 +20,72 @@ class ResultPage extends StatefulWidget {
 class _ResultPageState extends State<ResultPage> {
   bool _deleting = false;
 
+  /// Pops everything back to Home in one shot, instead of one screen at
+  /// a time. Without this, the system back button would step back
+  /// through Camera (which still shows the photo it took, sitting idle)
+  /// since identifying/guidance replace each other but never replace
+  /// Camera itself - confusing after the scan is already done and saved.
+  void _goHome(BuildContext context) {
+    Navigator.popUntil(context, (route) => route.isFirst);
+  }
+
   @override
   Widget build(BuildContext context) {
     final Object? arguments = ModalRoute.of(context)?.settings.arguments;
-    final Product product =
-        arguments is Product ? arguments : productProvider.history().first;
+    final Product? product = arguments is Product ? arguments : null;
+    if (product == null) return const MissingProductScaffold();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Producto identificado'),
-        actions: [
-          IconButton(
-            icon: _deleting
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) return;
+        _goHome(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Producto identificado'),
+          actions: [
+            IconButton(
+              icon: _deleting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    )
+                  : Icon(
+                      Icons.delete_outline,
                       color: Theme.of(context).colorScheme.error,
                     ),
-                  )
-                : Icon(
-                    Icons.delete_outline,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-            tooltip: 'Eliminar',
-            onPressed: _deleting ? null : () => _confirmDelete(product),
+              tooltip: 'Eliminar',
+              onPressed: _deleting ? null : () => _confirmDelete(product),
+            ),
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _header(context, product),
+            const SizedBox(height: 16),
+            _dataCard(context, product),
+            const SizedBox(height: 16),
+            _priceCard(context, product),
+            const SizedBox(height: 24),
+            _actions(context, product),
+          ],
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: FilledButton.icon(
+              onPressed: () => _goHome(context),
+              icon: const Icon(Icons.check),
+              label: const Text('Listo, volver al inicio'),
+            ),
           ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _header(context, product),
-          const SizedBox(height: 16),
-          _dataCard(context, product),
-          const SizedBox(height: 16),
-          _priceCard(context, product),
-          const SizedBox(height: 24),
-          _actions(context, product),
-        ],
+        ),
       ),
     );
   }
@@ -73,10 +99,7 @@ class _ResultPageState extends State<ResultPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                product.name,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+              Text(product.name, style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 4),
               Text('${product.brand} - ${product.category}'),
               const SizedBox(height: 8),
@@ -137,33 +160,63 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   Widget _dataCard(BuildContext context, Product product) {
+    // Only rows with something real in them, so an item whose region or
+    // edition couldn't be read doesn't show a column of "Sin confirmar".
+    final List<Widget> rows = [
+      _dataRow('Tipo', product.category),
+      if (product.platform.isNotEmpty) _dataRow('Plataforma', product.platform),
+      _dataRow('Marca', product.brand),
+      if (product.region.isNotEmpty) _dataRow('Region', product.region),
+      if (product.edition.isNotEmpty) _dataRow('Edicion', product.edition),
+      _dataRow(
+        'Codigo de catalogo',
+        product.model.isEmpty ? 'No visible en la foto' : product.model,
+      ),
+      if (product.completeness.isNotEmpty)
+        _dataRow('Incluye', _completenessLabel(product.completeness)),
+      _dataRow('Escaneado', product.scannedAt),
+    ];
+
     return Card(
       child: Column(
         children: [
-          _dataRow('Categoria', product.category),
-          const Divider(height: 1),
-          _dataRow('Marca', product.brand),
-          const Divider(height: 1),
-          _dataRow(
-            'Modelo exacto',
-            product.model.isEmpty ? 'Sin confirmar' : product.model,
-          ),
-          const Divider(height: 1),
-          _dataRow('Escaneado', product.scannedAt),
+          for (int i = 0; i < rows.length; i++) ...[
+            if (i > 0) const Divider(height: 1),
+            rows[i],
+          ],
         ],
       ),
     );
   }
 
+  String _completenessLabel(String value) {
+    switch (value) {
+      case 'complete_in_box':
+        return 'Completo en caja';
+      case 'box_and_game_no_manual':
+        return 'Caja y juego, sin manual';
+      case 'game_only':
+        return 'Solo el juego';
+      case 'console_only':
+        return 'Solo la consola';
+      case 'console_with_accessories':
+        return 'Consola con accesorios';
+      default:
+        return 'Sin determinar';
+    }
+  }
+
   Widget _dataRow(String label, String value) {
-    return ListTile(
-      dense: true,
-      title: Text(label),
-      trailing: Text(value),
-    );
+    return ListTile(dense: true, title: Text(label), trailing: Text(value));
   }
 
   Widget _priceCard(BuildContext context, Product product) {
+    // Both providers can legitimately come back empty right after saving
+    // (eBay account in review, MercadoLibre not configured yet, no
+    // network, ...). "$0 - $0" would read as broken, so this shows an
+    // honest pending state instead and points at the retry button below.
+    final bool hasPriceData = product.priceMax > 0;
+
     return Card(
       color: Theme.of(context).colorScheme.secondaryContainer,
       child: Padding(
@@ -176,16 +229,43 @@ class _ResultPageState extends State<ResultPage> {
               style: Theme.of(context).textTheme.labelLarge,
             ),
             const SizedBox(height: 4),
-            Text(
-              '${money(product.priceMin)} - ${money(product.priceMax)}',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 4),
-            const Text('Segun publicaciones parecidas'),
+            if (hasPriceData) ...[
+              Text(
+                '${money(product.priceMin)} - ${money(product.priceMax)}',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(_priceSourceLabel(product.priceSource)),
+            ] else ...[
+              Row(
+                children: [
+                  const Icon(Icons.hourglass_empty, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Todavia no se pudo conseguir un precio. Toca '
+                      '"Comparar precios" para reintentar.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  /// Honesty matters here: a real marketplace figure and the AI's own
+  /// guess shouldn't look the same.
+  String _priceSourceLabel(String source) {
+    if (source.isEmpty) return 'Segun publicaciones parecidas';
+    if (source == 'IA (estimado)') {
+      return 'Estimacion de la IA - no proviene de una publicacion real, '
+          'usala como referencia aproximada';
+    }
+    return 'Segun publicaciones activas en $source';
   }
 
   Widget _actions(BuildContext context, Product product) {
@@ -194,11 +274,8 @@ class _ResultPageState extends State<ResultPage> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: () => Navigator.pushNamed(
-              context,
-              'price',
-              arguments: product,
-            ),
+            onPressed: () =>
+                Navigator.pushNamed(context, 'price', arguments: product),
             icon: const Icon(Icons.trending_up),
             label: const Text('Comparar precios'),
           ),
@@ -207,29 +284,20 @@ class _ResultPageState extends State<ResultPage> {
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
-            onPressed: () => Navigator.pushNamed(
-              context,
-              'listing',
-              arguments: product,
-            ),
+            onPressed: () =>
+                Navigator.pushNamed(context, 'listing', arguments: product),
             icon: const Icon(Icons.sell_outlined),
             label: const Text('Generar publicacion'),
           ),
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () => Navigator.pushNamed(context, 'condition'),
-            icon: const Icon(Icons.compare),
-            label: const Text('Documentar el estado'),
-          ),
-        ),
-        const SizedBox(height: 8),
         TextButton.icon(
-          onPressed: () => Navigator.pushNamed(context, 'guidance'),
+          // Re-running the whole scan is the honest option here: the
+          // guidance screen needs a live identification session, which
+          // no longer exists once the product has been saved.
+          onPressed: () => Navigator.pushReplacementNamed(context, 'camera'),
           icon: const Icon(Icons.help_outline),
-          label: const Text('No es este producto'),
+          label: const Text('No es este producto, escanear de nuevo'),
         ),
       ],
     );
@@ -274,9 +342,8 @@ class _ResultPageState extends State<ResultPage> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _deleting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo eliminar: $error')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('No se pudo eliminar: $error')));
     }
   }
 }

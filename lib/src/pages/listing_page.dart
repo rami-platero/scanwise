@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/product.dart';
-import '../provider/product_provider.dart';
+import '../widgets/missing_product_scaffold.dart';
 import '../services/product_service.dart';
 import '../utils/format_util.dart';
 
@@ -52,8 +52,8 @@ class _ListingPageState extends State<ListingPage> {
   @override
   Widget build(BuildContext context) {
     final Object? arguments = ModalRoute.of(context)?.settings.arguments;
-    final Product product =
-        arguments is Product ? arguments : productProvider.history().first;
+    final Product? product = arguments is Product ? arguments : null;
+    if (product == null) return const MissingProductScaffold();
 
     _loadProduct(product);
 

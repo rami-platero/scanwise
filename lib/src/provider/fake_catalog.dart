@@ -313,6 +313,11 @@ Product randomGuess() {
   );
 }
 
+/// One random sample scenario. Used by the offline mock recognition
+/// path (see mock_recognition.dart) when Gemini is turned off.
+ScanScenario randomScenario() =>
+    _scenarios[_random.nextInt(_scenarios.length)];
+
 ScanScenario? scenarioById(String? id) {
   if (id == null) return null;
   for (final ScanScenario scenario in _scenarios) {
