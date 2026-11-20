@@ -81,7 +81,11 @@ class _CameraPageState extends State<CameraPage> {
       Navigator.pushNamed(
         context,
         'identifying',
-        arguments: {'photoPath': photo.path},
+        arguments: {
+          'photoPath': photo.path,
+          // Set when we got here from the barcode scanner.
+          'barcodeValue': _incomingBarcode,
+        },
       );
     } catch (error) {
       if (!mounted) return;
@@ -104,6 +108,13 @@ class _CameraPageState extends State<CameraPage> {
     );
   }
 
+  /// Barcode handed over by the barcode screen, if any.
+  String? get _incomingBarcode {
+    final Object? arguments = ModalRoute.of(context)?.settings.arguments;
+    if (arguments is Map) return arguments['barcodeValue'] as String?;
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -111,7 +122,7 @@ class _CameraPageState extends State<CameraPage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Foto del producto'),
+        title: const Text('Foto del juego o consola'),
       ),
       body: Column(
         children: [
@@ -163,8 +174,8 @@ class _CameraPageState extends State<CameraPage> {
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 48),
         child: Text(
-          'La camara se abre sola. Si la cerraste sin sacar nada, toca el '
-          'boton para volver a intentar.',
+          'Encuadra el juego o la consola. La camara se abre sola; si la '
+          'cerraste sin sacar nada, toca el boton para reintentar.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white70),
         ),

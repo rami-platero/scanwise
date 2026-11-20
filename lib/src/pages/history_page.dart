@@ -20,10 +20,53 @@ class _HistoryPageState extends State<HistoryPage> {
   List<Product>? _products;
   String? _error;
 
+  final TextEditingController _searchController = TextEditingController();
+
+  /// Free-text search, lowercased once instead of on every comparison.
+  String _query = '';
+
+  /// null means "todas"; otherwise one of the categories actually
+  /// present in the data, so the app never offers an empty filter.
+  String? _category;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Matches against everything the user might remember about an item,
+  /// not just its title: platform and brand are often what comes to
+  /// mind first ("el de PlayStation 2").
+  List<Product> _visible(List<Product> products) {
+    return products.where((Product product) {
+      if (_category != null && product.category != _category) return false;
+      if (_query.isEmpty) return true;
+
+      final String haystack = [
+        product.name,
+        product.platform,
+        product.brand,
+        product.model,
+      ].join(' ').toLowerCase();
+
+      return haystack.contains(_query);
+    }).toList();
+  }
+
+  List<String> _categoriesIn(List<Product> products) {
+    final Set<String> categories = products
+        .map((Product product) => product.category)
+        .where((String category) => category.isNotEmpty)
+        .toSet();
+    final List<String> sorted = categories.toList()..sort();
+    return sorted;
   }
 
   Future<void> _load() async {
@@ -38,7 +81,7 @@ class _HistoryPageState extends State<HistoryPage> {
       setState(() => _products = products);
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Could not load the history: $error');
+      setState(() => _error = 'No se pudo cargar el historial: $error');
     }
   }
 
@@ -69,9 +112,114 @@ class _HistoryPageState extends State<HistoryPage> {
     if (_products!.isEmpty) {
       return RefreshIndicator(onRefresh: _load, child: _emptyState(context));
     }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: _list(context, _products!),
+
+    final List<Product> visible = _visible(_products!);
+
+    return Column(
+      children: [
+        _filters(context, _products!),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: visible.isEmpty
+                ? _noMatchesState(context)
+                : _list(context, visible),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _filters(BuildContext context, List<Product> products) {
+    final List<String> categories = _categoriesIn(products);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Column(
+        children: [
+          TextField(
+            controller: _searchController,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Buscar por titulo, plataforma o marca',
+              prefixIcon: const Icon(Icons.search),
+              isDense: true,
+              border: const OutlineInputBorder(),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear),
+                      tooltip: 'Limpiar',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _query = '');
+                      },
+                    ),
+            ),
+            onChanged: (String value) =>
+                setState(() => _query = value.trim().toLowerCase()),
+          ),
+          // A single category means the filter row would only ever offer
+          // "todas" and that one - no point taking up the space.
+          if (categories.length > 1)
+            SizedBox(
+              height: 56,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _categoryChip(label: 'Todas', value: null),
+                  for (final String category in categories)
+                    _categoryChip(label: category, value: category),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _categoryChip({required String label, required String? value}) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Center(
+        child: FilterChip(
+          label: Text(label),
+          selected: _category == value,
+          onSelected: (bool selected) =>
+              setState(() => _category = selected ? value : null),
+        ),
+      ),
+    );
+  }
+
+  Widget _noMatchesState(BuildContext context) {
+    return ListView(
+      children: [
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.5,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.search_off, size: 48, color: Colors.grey),
+                const SizedBox(height: 12),
+                const Text('Ningun producto coincide con la busqueda'),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {
+                      _query = '';
+                      _category = null;
+                    });
+                  },
+                  child: const Text('Limpiar filtros'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -136,15 +284,20 @@ class _HistoryPageState extends State<HistoryPage> {
             padding: const EdgeInsets.only(right: 24),
             child: const Icon(Icons.delete, color: Colors.white),
           ),
-          onDismissed: (DismissDirection direction) =>
-              _deleteProduct(product, i),
+          onDismissed: (DismissDirection direction) => _deleteProduct(product),
           child: _productTile(context, product),
         );
       },
     );
   }
 
-  Future<void> _deleteProduct(Product product, int index) async {
+  /// Works off the product itself rather than its row position: the list
+  /// on screen can be filtered, so an index into it wouldn't line up
+  /// with the full list this removes from.
+  Future<void> _deleteProduct(Product product) async {
+    final int index = _products!.indexOf(product);
+    if (index == -1) return;
+
     // Remove it from the list right away so the UI feels instant...
     setState(() => _products!.removeAt(index));
 
@@ -154,9 +307,8 @@ class _HistoryPageState extends State<HistoryPage> {
       // ...and put it back if the delete actually failed on the server.
       if (!mounted) return;
       setState(() => _products!.insert(index, product));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete: $error')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('No se pudo eliminar: $error')));
     }
   }
 
@@ -182,12 +334,10 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
         ],
       ),
-      // If it was left unconfirmed, tapping it resumes the photo guidance.
-      onTap: () => Navigator.pushNamed(
-        context,
-        pending ? 'guidance' : 'result',
-        arguments: product,
-      ),
+      // Always the result screen: the guidance step needs a live
+      // identification session, which no longer exists for a saved row.
+      // From there the user can rescan if the match looks wrong.
+      onTap: () => Navigator.pushNamed(context, 'result', arguments: product),
     );
   }
 

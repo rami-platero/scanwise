@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../app.dart';
 import '../models/product.dart';
+import '../services/auth_service.dart';
 import '../services/product_service.dart';
 import '../utils/format_util.dart';
 import '../utils/icon_string_util.dart';
@@ -58,6 +59,38 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
     await next;
   }
 
+  /// Signing out is enough on its own: AuthGate is listening to the auth
+  /// stream and swaps this screen for the login one.
+  Future<void> _confirmLogout() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Cerrar sesion'),
+        content: const Text('Vas a tener que volver a iniciar sesion.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cerrar sesion'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await authService.signOut();
+    } on AuthFailure catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -87,6 +120,31 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             tooltip: 'Notificaciones',
             onPressed: () => Navigator.pushNamed(context, 'notifications'),
           ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Cuenta',
+            onSelected: (String value) {
+              if (value == 'logout') _confirmLogout();
+            },
+            itemBuilder: (BuildContext context) => [
+              PopupMenuItem<String>(
+                enabled: false,
+                child: Text(
+                  authService.currentEmail,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                value: 'logout',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.logout),
+                  title: Text('Cerrar sesion'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -96,6 +154,7 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
           children: [
             _scanCard(context),
             const SizedBox(height: 16),
+            _inventorySummary(context),
             _quickActions(context),
             const SizedBox(height: 24),
             _sectionTitle(context, 'Escaneos recientes', () {
@@ -121,16 +180,20 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.photo_camera, size: 40, color: colors.onPrimaryContainer),
+            Icon(
+              Icons.photo_camera,
+              size: 40,
+              color: colors.onPrimaryContainer,
+            ),
             const SizedBox(height: 12),
             Text(
-              'Identificar un producto',
+              'Identificar un juego o consola',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 4),
             const Text(
-              'Saca una foto y la app reconoce la categoria, la marca y el '
-              'modelo.',
+              'Saca una foto del juego o la consola y la IA reconoce el '
+              'titulo, la plataforma y la version exacta.',
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -144,6 +207,82 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
     );
   }
 
+  /// What the collection is worth, summed from the same rows the recent
+  /// list already fetched - no extra query. Hidden until there's at
+  /// least one product, so a new account doesn't open on a row of zeros.
+  Widget _inventorySummary(BuildContext context) {
+    return FutureBuilder<List<Product>>(
+      future: _recentFuture,
+      builder: (BuildContext context, AsyncSnapshot<List<Product>> snapshot) {
+        final List<Product> products = snapshot.data ?? const <Product>[];
+        if (products.isEmpty) return const SizedBox.shrink();
+
+        final double total = products.fold<double>(
+          0,
+          (double sum, Product product) => sum + product.suggestedPrice,
+        );
+        final int priced = products
+            .where((Product product) => product.priceMax > 0)
+            .length;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _summaryValue(
+                          context,
+                          label: 'Productos',
+                          value: '${products.length}',
+                        ),
+                      ),
+                      Expanded(
+                        child: _summaryValue(
+                          context,
+                          label: 'Valor estimado',
+                          value: money(total),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (priced < products.length) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '$priced de ${products.length} con precio de referencia.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _summaryValue(
+    BuildContext context, {
+    required String label,
+    required String value,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 2),
+        Text(value, style: Theme.of(context).textTheme.headlineSmall),
+      ],
+    );
+  }
+
   Widget _quickActions(BuildContext context) {
     return Row(
       children: [
@@ -153,15 +292,6 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             icon: Icons.qr_code_scanner,
             label: 'Codigo de barras',
             route: 'barcode',
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _actionTile(
-            context,
-            icon: Icons.compare,
-            label: 'Comparar estado',
-            route: 'condition',
           ),
         ),
         const SizedBox(width: 12),
@@ -239,8 +369,9 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
           );
         }
 
-        final List<Product> recent =
-            (snapshot.data ?? const <Product>[]).take(3).toList();
+        final List<Product> recent = (snapshot.data ?? const <Product>[])
+            .take(3)
+            .toList();
 
         if (recent.isEmpty) {
           return const Padding(
@@ -250,7 +381,9 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
         }
 
         return Column(
-          children: recent.map((product) => _recentTile(context, product)).toList(),
+          children: recent
+              .map((product) => _recentTile(context, product))
+              .toList(),
         );
       },
     );
@@ -268,11 +401,8 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             '${money(product.priceMin)} - ${money(product.priceMax)}',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          onTap: () => Navigator.pushNamed(
-            context,
-            'result',
-            arguments: product,
-          ),
+          onTap: () =>
+              Navigator.pushNamed(context, 'result', arguments: product),
         ),
         const Divider(height: 1),
       ],
