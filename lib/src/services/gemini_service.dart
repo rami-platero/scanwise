@@ -54,10 +54,36 @@ class GeminiService {
       ...imageParts,
     ];
 
-    // Try the current responseFormat shape first; if this API version
-    // doesn't know it, fall back to the older responseMimeType +
-    // responseSchema pair, which is still accepted. The error text spells
-    // the field either way depending on version, hence both spellings.
+    // A 503 ("model overloaded") is Google's own infrastructure being
+    // busy, not something wrong with this request - it usually clears
+    // up within a few seconds. Retry a couple of times with a growing
+    // delay before giving up, instead of failing on the first blip.
+    const List<Duration> overloadRetryDelays = [
+      Duration(seconds: 3),
+      Duration(seconds: 8),
+    ];
+
+    http.Response response = await _sendWithLegacyFallback(parts);
+
+    for (int attempt = 0;
+        response.statusCode == 503 && attempt < overloadRetryDelays.length;
+        attempt++) {
+      await Future<void>.delayed(overloadRetryDelays[attempt]);
+      response = await _sendWithLegacyFallback(parts);
+    }
+
+    if (response.statusCode != 200) {
+      throw GeminiException(_errorMessageFor(response));
+    }
+
+    return _parseResponse(response.body);
+  }
+
+  /// One request, with the responseFormat/responseSchema version
+  /// fallback already baked in (see the comment this replaced).
+  Future<http.Response> _sendWithLegacyFallback(
+    List<Map<String, dynamic>> parts,
+  ) async {
     http.Response response = await _post(_buildBody(parts, legacy: false));
 
     if (response.statusCode == 400 &&
@@ -66,11 +92,7 @@ class GeminiService {
       response = await _post(_buildBody(parts, legacy: true));
     }
 
-    if (response.statusCode != 200) {
-      throw GeminiException(_errorMessageFor(response));
-    }
-
-    return _parseResponse(response.body);
+    return response;
   }
 
   Future<http.Response> _post(Map<String, dynamic> body) {
@@ -319,10 +341,20 @@ class GeminiService {
       ..writeln('PARA VENDER:')
       ..writeln(
         '- ebay_query: la busqueda EN INGLES que haria un '
-        'coleccionista para encontrar exactamente este producto. Inclui '
-        'titulo y plataforma, y el codigo o region si los sabes. Sin '
-        'palabras de estado ("used", "good"). Ej: "Silent Hill 2 '
-        'PlayStation 2 SLUS-20228".',
+        'coleccionista para encontrar exactamente este producto. '
+        'Siempre inclui titulo y plataforma. Sin palabras de estado '
+        '("used", "good"). Ej: "Silent Hill 2 PlayStation 2".',
+      )
+      ..writeln(
+        '- Sumale un codigo a ebay_query SOLO si es un codigo de '
+        'CATALOGO/SERIE de disco o cartucho de ese formato especifico '
+        '(SLUS-20228, SCES-50380, DOL-001, NTR-...) - esos SI aparecen '
+        'en titulos reales de publicaciones. NO sumes un codigo de SKU '
+        'interno de la editora/distribuidora (ej. formatos tipo '
+        '"E4H-00095" impresos en un sticker cerca del codigo de '
+        'barras): esos nunca aparecen en el titulo de una publicacion '
+        'y arruinan la busqueda devolviendo cero resultados. Ante la '
+        'duda, dejalo afuera: title + platform ya alcanza.',
       )
       ..writeln(
         '- listing.title: titulo de publicacion en espanol, '
@@ -596,6 +628,11 @@ class GeminiService {
       case 429:
         return 'Se alcanzo el limite de uso de Gemini. Esperá un momento e '
             'intentá de nuevo.';
+      case 503:
+        return 'Los servidores de Gemini estan saturados por demanda alta '
+            'en este momento (ya se reintento un par de veces). No es un '
+            'problema de tu cuenta ni de tus limites - esperá un minuto '
+            'y volve a intentar.';
       default:
         return 'Error de Gemini (${response.statusCode}). $detail';
     }
