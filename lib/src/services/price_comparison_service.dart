@@ -38,10 +38,16 @@ class PriceComparisonService {
 
     if (ebayService.isConfigured) {
       try {
-        return await ebayService.searchSimilar(
+        final MarketPriceReport report = await ebayService.searchSimilar(
           query: query,
           isConsole: isConsole,
         );
+        // A clean 200 with zero matching items isn't an error, but it's
+        // not useful either - worth letting the next provider try
+        // before giving up, instead of treating "found nothing" the
+        // same as "found something real".
+        if (!report.isEmpty) return report;
+        failures.add('eBay: no encontro publicaciones para esa busqueda.');
       } on EbayException catch (error) {
         failures.add('eBay: ${error.message}');
       } catch (error) {
@@ -53,9 +59,11 @@ class PriceComparisonService {
 
     if (mercadoLibreService.isConfigured) {
       try {
-        return await mercadoLibreService.searchSimilar(
-          query: query,
-          isConsole: isConsole,
+        final MarketPriceReport report = await mercadoLibreService
+            .searchSimilar(query: query, isConsole: isConsole);
+        if (!report.isEmpty) return report;
+        failures.add(
+          'MercadoLibre: no encontro publicaciones para esa busqueda.',
         );
       } on MercadoLibreException catch (error) {
         failures.add('MercadoLibre: ${error.message}');
