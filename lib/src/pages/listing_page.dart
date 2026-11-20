@@ -15,6 +15,7 @@ class ListingPage extends StatefulWidget {
 }
 
 class _ListingPageState extends State<ListingPage> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
@@ -59,53 +60,69 @@ class _ListingPageState extends State<ListingPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Datos de la publicacion')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          TextField(
-            controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Titulo',
-              border: OutlineInputBorder(),
+      body: Form(
+        key: _formKey,
+        // Shows the error under a field as soon as the user has touched
+        // it, instead of staying silent until the save button is hit.
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            TextFormField(
+              controller: _titleController,
+              textCapitalization: TextCapitalization.sentences,
+              maxLength: 120,
+              decoration: const InputDecoration(
+                labelText: 'Titulo',
+                helperText: 'Como lo va a ver el comprador',
+                border: OutlineInputBorder(),
+              ),
+              validator: _validateTitle,
             ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            // Category comes from the identification step, not editable here.
-            readOnly: true,
-            controller: TextEditingController(text: product.category),
-            decoration: const InputDecoration(
-              labelText: 'Categoria',
-              border: OutlineInputBorder(),
+            const SizedBox(height: 8),
+            TextFormField(
+              // Category comes from the identification step, not editable.
+              readOnly: true,
+              initialValue: product.category,
+              decoration: const InputDecoration(
+                labelText: 'Categoria',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _descriptionController,
-            maxLines: 5,
-            decoration: const InputDecoration(
-              labelText: 'Descripcion',
-              alignLabelWithHint: true,
-              border: OutlineInputBorder(),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _descriptionController,
+              maxLines: 5,
+              maxLength: 600,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Descripcion',
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(),
+              ),
+              validator: _validateDescription,
             ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _priceController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Precio sugerido',
-              prefixText: '\$ ',
-              border: OutlineInputBorder(),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _priceController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Precio sugerido',
+                prefixText: '\$ ',
+                border: OutlineInputBorder(),
+              ),
+              validator: _validatePrice,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Rango de referencia: ${money(product.priceMin)} - '
-            '${money(product.priceMax)}',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              'Rango de referencia: ${money(product.priceMin)} - '
+              '${money(product.priceMax)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
       bottomNavigationBar: _bottomActions(context),
     );
@@ -159,6 +176,38 @@ class _ListingPageState extends State<ListingPage> {
     );
   }
 
+  String? _validateTitle(String? value) {
+    final String title = (value ?? '').trim();
+    if (title.isEmpty) return 'Poné un titulo para la publicacion';
+    if (title.length < 5) return 'Muy corto, usá al menos 5 caracteres';
+    return null;
+  }
+
+  String? _validateDescription(String? value) {
+    final String description = (value ?? '').trim();
+    if (description.isEmpty) return 'Describí el producto y su estado';
+    if (description.length < 15) {
+      return 'Muy corta, contá al menos el estado en el que esta';
+    }
+    return null;
+  }
+
+  /// Accepts "1234", "1234.50" and "1234,50" - a comma is what most
+  /// Spanish-locale keyboards give for the decimal separator.
+  String? _validatePrice(String? value) {
+    final String raw = (value ?? '').trim().replaceAll(',', '.');
+    if (raw.isEmpty) return 'Poné un precio';
+
+    final double? price = double.tryParse(raw);
+    if (price == null) return 'Tiene que ser un numero (ej. 15000)';
+    if (price <= 0) return 'El precio tiene que ser mayor a 0';
+    if (price > 99999999) return 'Ese precio es demasiado alto';
+    return null;
+  }
+
+  double get _parsedPrice =>
+      double.parse(_priceController.text.trim().replaceAll(',', '.'));
+
   /// Persists the edited title, description and price back to the
   /// product's row in Supabase (UPDATE).
   Future<void> _saveChanges() async {
@@ -168,19 +217,20 @@ class _ListingPageState extends State<ListingPage> {
       return;
     }
 
-    final double? price = double.tryParse(_priceController.text);
-    if (price == null) {
-      _showMessage('El precio no es un numero valido');
+    if (!_formKey.currentState!.validate()) {
+      _showMessage('Revisá los campos marcados en rojo');
       return;
     }
+
+    final double price = _parsedPrice;
 
     setState(() => _saving = true);
 
     try {
       await productService.updateListing(
         product.id!,
-        name: _titleController.text,
-        description: _descriptionController.text,
+        name: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
         priceMin: price,
         priceMax: price,
       );
