@@ -86,9 +86,8 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
       await authService.signOut();
     } on AuthFailure catch (failure) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(failure.message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
     }
   }
 
@@ -155,6 +154,7 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
           children: [
             _scanCard(context),
             const SizedBox(height: 16),
+            _inventorySummary(context),
             _quickActions(context),
             const SizedBox(height: 24),
             _sectionTitle(context, 'Escaneos recientes', () {
@@ -180,7 +180,11 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.photo_camera, size: 40, color: colors.onPrimaryContainer),
+            Icon(
+              Icons.photo_camera,
+              size: 40,
+              color: colors.onPrimaryContainer,
+            ),
             const SizedBox(height: 12),
             Text(
               'Identificar un juego o consola',
@@ -200,6 +204,82 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
           ],
         ),
       ),
+    );
+  }
+
+  /// What the collection is worth, summed from the same rows the recent
+  /// list already fetched - no extra query. Hidden until there's at
+  /// least one product, so a new account doesn't open on a row of zeros.
+  Widget _inventorySummary(BuildContext context) {
+    return FutureBuilder<List<Product>>(
+      future: _recentFuture,
+      builder: (BuildContext context, AsyncSnapshot<List<Product>> snapshot) {
+        final List<Product> products = snapshot.data ?? const <Product>[];
+        if (products.isEmpty) return const SizedBox.shrink();
+
+        final double total = products.fold<double>(
+          0,
+          (double sum, Product product) => sum + product.suggestedPrice,
+        );
+        final int priced = products
+            .where((Product product) => product.priceMax > 0)
+            .length;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _summaryValue(
+                          context,
+                          label: 'Productos',
+                          value: '${products.length}',
+                        ),
+                      ),
+                      Expanded(
+                        child: _summaryValue(
+                          context,
+                          label: 'Valor estimado',
+                          value: money(total),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (priced < products.length) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '$priced de ${products.length} con precio de referencia.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _summaryValue(
+    BuildContext context, {
+    required String label,
+    required String value,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 2),
+        Text(value, style: Theme.of(context).textTheme.headlineSmall),
+      ],
     );
   }
 
@@ -289,8 +369,9 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
           );
         }
 
-        final List<Product> recent =
-            (snapshot.data ?? const <Product>[]).take(3).toList();
+        final List<Product> recent = (snapshot.data ?? const <Product>[])
+            .take(3)
+            .toList();
 
         if (recent.isEmpty) {
           return const Padding(
@@ -300,7 +381,9 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
         }
 
         return Column(
-          children: recent.map((product) => _recentTile(context, product)).toList(),
+          children: recent
+              .map((product) => _recentTile(context, product))
+              .toList(),
         );
       },
     );
@@ -318,11 +401,8 @@ class _MyHomePageState extends State<MyHomePage> with RouteAware {
             '${money(product.priceMin)} - ${money(product.priceMax)}',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          onTap: () => Navigator.pushNamed(
-            context,
-            'result',
-            arguments: product,
-          ),
+          onTap: () =>
+              Navigator.pushNamed(context, 'result', arguments: product),
         ),
         const Divider(height: 1),
       ],
